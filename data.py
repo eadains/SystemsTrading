@@ -2,12 +2,14 @@ import sqlite3
 import pandas as pd
 import zipfile
 import os
+import quandl
 
 
 def update_tickers():
     """
     Function that updates the tickers database table.
     """
+    quandl.read_key()
     conn = sqlite3.connect("data.db")
     # Fetch most recent updated date from tickers table
     with conn:
@@ -62,6 +64,7 @@ def update_tickers():
     tickers_frame = tickers_frame[column_order]
     # Convert dataframe to records for database execution
     tickers_records = tickers_frame.astype("str").to_records(index=False)
+    print(f"New ticker records: {len(tickers_records)}")
 
     with conn:
         conn.executemany(
@@ -74,6 +77,7 @@ def update_prices():
     """
     Function that updates the prices database table.
     """
+    quandl.read_key()
     conn = sqlite3.connect("data.db")
     # Fetch most recent updated date from prices table
     with conn:
@@ -103,6 +107,7 @@ def update_prices():
         "lastupdated",
     ]
     sep_records = pd.read_csv(csv_data)[column_order].to_records(index=False)
+    print(f"New equity price records: {len(sep_records)}")
 
     with conn:
         conn.executemany(
@@ -118,6 +123,7 @@ def update_prices():
     csv_data = data_zip.open(csv_name)
 
     sfp_records = pd.read_csv(csv_data)[column_order].to_records(index=False)
+    print(f"New fund price records: {len(sfp_records)}")
 
     with conn:
         conn.executemany(
@@ -133,6 +139,7 @@ def update_fundamentals():
     """
     Function that updates fundamentals table.
     """
+    quandl.read_key()
     conn = sqlite3.connect("data.db")
     # Fetch most recent updated date from prices table
     with conn:
@@ -262,6 +269,7 @@ def update_fundamentals():
     sf1_records = pd.read_csv(csv_data, dtype="str")[column_order].to_records(
         index=False
     )
+    print(f"New fundamental records: {len(sf1_records)}")
 
     with conn:
         conn.executemany(
