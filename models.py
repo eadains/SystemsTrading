@@ -4,7 +4,7 @@ import pystan
 from abc import ABC, abstractmethod
 
 
-class ModelBase:
+class ModelBase(ABC):
     """
     Abstract class for models to follow.
     """
@@ -15,7 +15,12 @@ class ModelBase:
 
     @abstractmethod
     def forecast(self, oos_periods):
-        pass
+        """
+        This function returns a forecast from the model. For generalizing to multi-period out-of-sample forecasts,
+        this must act like a generator and yield the multi-period forecast one step at a time. This is relevant
+        for the LoopModelTester in backtesting.py
+        """
+        yield NoneType
 
 
 class StochVol(ModelBase):
@@ -59,7 +64,7 @@ class StochVol(ModelBase):
         Fits Stan model using given returns
         """
         params = {"len": len(returns), "returns": returns}
-        self.sample = self.model.sampling(data=params, chains=4, warmup=250, iter=1250)
+        self.sample = self.model.sampling(data=params, chains=4, warmup=250, iter=1500)
 
     def forecast(self, oos_periods):
         """
@@ -74,10 +79,10 @@ class StochVol(ModelBase):
         phi = sample_data["phi"]
         sigma = sample_data["sigma"]
 
-        for t in range(oos_periods):
+        for _ in range(oos_periods):
             resids = sigma * np.random.randn(5000)
             forward_vol = mu + phi * (h - mu) + resids
-            output[:, t] = forward_vol
+            yield forward_vol
             # Set new 'most recent' vol value to our new predicted value so we can
             # do multi-period ahead forecasting
             h = forward_vol
