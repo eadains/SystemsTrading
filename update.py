@@ -7,3 +7,4 @@ if __name__ == "__main__":
     print("Prices updated.")
     update_fundamentals()
     print("Fundamentals updated.")
+    
