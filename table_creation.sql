@@ -1,5 +1,5 @@
 CREATE TABLE tickers(
-    permaticker NUMERIC PRIMARY KEY,
+    permaticker NUMERIC,
     ticker TEXT,
     name TEXT,
     exchange TEXT,
@@ -25,7 +25,8 @@ CREATE TABLE tickers(
     firstquarter TEXT,
     lastquarter TEXT,
     secfilings TEXT,
-    companysite TEXT
+    companysite TEXT,
+    PRIMARY KEY (permaticker, ticker)
 );
 
 CREATE TABLE prices(
@@ -36,7 +37,7 @@ CREATE TABLE prices(
     low NUMERIC,
     close NUMERIC,
     volume NUMERIC,
-    dividends NUMERIC,
+    closeadj NUMERIC,
     closeunadj NUMERIC,
     lastupdated NUMERIC,
     PRIMARY KEY (ticker, date)
@@ -154,5 +155,5 @@ CREATE TABLE fundamentals(
     taxliabilities NUMERIC,
     tbvps NUMERIC,
     workingcapital NUMERIC,
-    PRIMARY KEY (ticker, dimension, datekey)
+    PRIMARY KEY (ticker, dimension, datekey, reportperiod)
 )
