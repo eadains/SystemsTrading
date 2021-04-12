@@ -1,6 +1,6 @@
-from vol_mdn import create_data, MDNVol
 import pandas as pd
 from scipy.stats import norm
+from scipy.optimize import minimize
 import numpy as np
 
 
@@ -27,6 +27,13 @@ def bs_price(right, S, K, T, sigma, r):
         return price
 
 
+def log_wealth_optim(f, pnl):
+    """
+    Returns the negative of log wealth for optimization
+    """
+    return -np.mean(np.log(1 + f * pnl))
+
+
 class ShortIronCondor:
     def __init__(self, put, call, hedge_put, hedge_call):
         """
@@ -43,6 +50,8 @@ class ShortIronCondor:
         self.premium = (call["mid_price"] + put["mid_price"]) - (
             hedge_put["mid_price"] + hedge_call["mid_price"]
         )
+        # Deflate the premium by 15% to be conservative and account for slippage
+        self.premium = 0.85 * self.premium
         self.max_loss = put["strike"] - hedge_put["strike"] - self.premium
 
     def pnl(self, underlying_price):
@@ -112,7 +121,7 @@ class OptionPosition:
             axis=1,
         )
         self.chain["mid_price"] = (self.chain["bid"] + self.chain["ask"]) / 2
-        self.chain["skew_premium"] = self.chain["mid_price"] - self.chain["values"]
+        self.chain["skew_premium"] = self.chain["mid_price"] - self.chain["model_value"]
 
     def find_contracts(self):
         """
@@ -145,15 +154,16 @@ class OptionPosition:
     def calc_kelly(self):
         """
         Simulates future returns and determines option position PNL.
-        Returns the kelly criterion betting percentage.
+        Returns the kelly criterion betting percentage by optimizing the log of wealth
         """
-        returns = norm.rvs(0, self.vols / np.sqrt(252))
+        # MDNVol outputs 5 day volatility, so we need to divide by sqrt(52) to get
+        returns = norm.rvs(0, self.vols)
         prices = self.underlying_price * (1 + returns)
         vfunc = np.vectorize(self.position.pnl)
-        pnl = vfunc(prices)
+        # Each option is 100 shares and return is based on an investment of $1000, so 100 / 1000 = 10
+        pnl = vfunc(prices) / 10
 
-        profit_percent = np.sum(pnl > 0) / len(pnl)
-        mean_profit = np.mean(pnl[pnl > 0]) / 10
-        mean_loss = -np.mean(pnl[pnl < 0]) / 10
+        initial = np.random.rand()
+        result = minimize(log_wealth_optim, initial, (pnl))
 
-        return (profit_percent / mean_loss) - ((1 - profit_percent) / mean_profit)
+        return result.x

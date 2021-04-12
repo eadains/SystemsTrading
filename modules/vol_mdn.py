@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical, Normal, MixtureSameFamily
 from torch.optim.swa_utils import AveragedModel, SWALR
+import pandas as pd
+import numpy as np
+import sqlite3
 
 
 class MDN(nn.Module):
@@ -57,8 +60,8 @@ class MDNVol:
         x: Input data
         y: Output data used for calculating loss function during training
         """
-        self.x = x
-        self.y = y
+        self.x = torch.Tensor(x.values)
+        self.y = torch.Tensor(y.values)
         self.model = MDN(x.shape[1], 1, 250, 5)
 
     def fit_model(self):
@@ -70,25 +73,25 @@ class MDNVol:
             optimizer, 100, 2
         )
 
-        swa_model = AveragedModel(model)
+        self.swa_model = AveragedModel(self.model)
         swa_start = 400
         swa_scheduler = SWALR(
             optimizer, swa_lr=0.001, anneal_epochs=10, anneal_strategy="cos"
         )
 
-        model.train()
-        swa_model.train()
+        self.model.train()
+        self.swa_model.train()
         for epoch in range(500):
             optimizer.zero_grad()
             output = self.model(self.x)
 
             loss = -output.log_prob(self.y.view(-1, 1)).sum()
 
-            train_loss.backward()
+            loss.backward()
             optimizer.step()
 
             if epoch > swa_start:
-                swa_model.update_parameters(model)
+                self.swa_model.update_parameters(self.model)
                 swa_scheduler.step()
             else:
                 scheduler.step()
@@ -96,14 +99,15 @@ class MDNVol:
             if epoch % 10 == 0:
                 print(f"Epoch {epoch} complete. Loss: {loss}")
 
-    def output_dist(self):
+    def output_dist(self, x):
         """
         Fits model and returns fitted distribution object.
 
         Returns: PyTorch MixtureNormal object
         """
         self.fit_model()
-        return self.model(x)
+        self.swa_model.eval()
+        return self.swa_model(torch.Tensor(x).view(1, -1))
 
 
 def rv_calc(data):
@@ -141,57 +145,60 @@ def create_lags(series, lags, name="x"):
     return result
 
 
-def create_data():
-    """
-    Creates necessary data for the MDNVol class.
+class Data:
+    def __init__(self):
+        """
+        Gets data for training the MDNVol network. Also outputs data for out-of-sample forecasting.
+        """
+        spx_minute = pd.read_csv(
+            "SPX_1min.csv",
+            header=0,
+            names=["datetime", "open", "high", "low", "close"],
+            index_col="datetime",
+            parse_dates=True,
+        )
+        self.spx_variance = rv_calc(spx_minute)
 
-    Returns:
-        x: Pandas dataframe
-        y: Pandas series
-    """
-    # Fetch intraday data from CSV and calculate realized variance
-    spx_minute = pd.read_csv(
-        "SPX_1min.csv",
-        header=0,
-        names=["datetime", "open", "high", "low", "close"],
-        index_col="datetime",
-        parse_dates=True,
-    )
-    spx_variance = rv_calc(spx_minute)
+        conn = sqlite3.Connection("data.db")
+        spx_data = pd.read_sql(
+            "SELECT * FROM prices WHERE ticker='^GSPC'",
+            conn,
+            index_col="date",
+            parse_dates="date",
+        )
+        spx_returns = np.log(spx_data["close"]) - np.log(spx_data["close"].shift(1))
+        self.spx_returns = spx_returns.dropna()
 
-    # Fetch VIX and SPX data from database and transform as necessary
-    conn = sqlite3.Connection("data.db")
-    spx_data = pd.read_sql(
-        "SELECT * FROM prices WHERE ticker='^GSPC'",
-        conn,
-        index_col="date",
-        parse_dates="date",
-    )
-    spx_returns = np.log(spx_data["close"]) - np.log(spx_data["close"].shift(1))
-    spx_returns = spx_returns.dropna()
+        vix_data = pd.read_sql(
+            "SELECT * FROM prices WHERE ticker='^VIX'",
+            conn,
+            index_col="date",
+            parse_dates="date",
+        )
+        # This puts it into units of daily standard deviation
+        self.vix = vix_data["close"] / np.sqrt(252) / 100
 
-    vix_data = pd.read_sql(
-        "SELECT * FROM prices WHERE ticker='^VIX'",
-        conn,
-        index_col="date",
-        parse_dates="date",
-    )
-    # This puts it into units of daily standard deviation
-    vix = vix_data["close"] / np.sqrt(252) / 100
+        vix_lags = create_lags(np.log(self.vix), 21, name="vix")
+        return_lags = create_lags(self.spx_returns, 21, name="returns")
+        rv_lags = create_lags(np.log(self.spx_variance), 21, name="rv")
 
-    # Create dataframe with lagged values of each series
-    vix_lags = create_lags(np.log(vix), 21, name="vix")
-    return_lags = create_lags(spx_returns, 21, name="returns")
-    rv_lags = create_lags(np.log(spx_variance), 21, name="rv")
+        self.x = pd.concat([vix_lags, return_lags, rv_lags], axis=1).dropna()
 
-    # Concatenate data to one dataframe
-    x = pd.concat([vix_lags, return_lags, rv_lags], axis=1).dropna()
-    # Calculates variance realized over the next 5 days. Logged for better distributional qualities.
-    y = np.log(spx_variance.rolling(5).sum().shift(-5)).dropna()
+    def get_training_data(self):
+        """
+        Gets data for training the network
+        """
+        # Calculates variance realized over the next 5 days. Logged for better distributional qualities.
+        y = np.log(self.spx_variance.rolling(5).sum().shift(-5)).dropna()
+        # Find common index between our input and output data so everything matches.
+        common_index = self.x.index.intersection(y.index)
+        x = self.x.loc[common_index]
+        y = y.loc[common_index]
 
-    # Find common index between our input and output data so everything matches.
-    common_index = x.index.intersection(y.index)
-    x = x.loc[common_index]
-    y = y.loc[common_index]
+        return x, y
 
-    return x, y
+    def get_forecast_data(self):
+        """
+        Gets last input row to use for out-of-sample forecasting.
+        """
+        return self.x.iloc[-1]
