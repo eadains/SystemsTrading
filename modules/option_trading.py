@@ -163,7 +163,14 @@ class OptionPosition:
         # Each option is 100 shares and return is based on an investment of $1000, so 100 / 1000 = 10
         pnl = vfunc(prices) / 10
 
+        print(f"Probability of Profit: {round(len(pnl[pnl > 0]) / len(pnl) * 100, 2)}%")
+        print(f"Mean Profit on Win: {round(np.mean(pnl[pnl > 0]) * 100, 2)}%")
+        print(f"Mean Profit on Loss: {round(np.mean(pnl[pnl < 0]) * 100, 2)}%")
+        print(
+            f"Forecasted 5-day Volatility (Annualized): {round(np.mean(self.vols) * np.sqrt(252 / 5) * 100, 2)}% +/- {round(np.std(self.vols) * np.sqrt(252 /5) * 100, 2)}%"
+        )
+
         initial = np.random.rand()
         result = minimize(log_wealth_optim, initial, (pnl))
 
-        return result.x
+        print(f"Kelly Bet Percentage: {round(result.x[0] * 100, 2)}%")

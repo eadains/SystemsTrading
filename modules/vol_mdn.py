@@ -74,14 +74,14 @@ class MDNVol:
         )
 
         self.swa_model = AveragedModel(self.model)
-        swa_start = 400
+        swa_start = 750
         swa_scheduler = SWALR(
             optimizer, swa_lr=0.001, anneal_epochs=10, anneal_strategy="cos"
         )
 
         self.model.train()
         self.swa_model.train()
-        for epoch in range(500):
+        for epoch in range(1000):
             optimizer.zero_grad()
             output = self.model(self.x)
 
